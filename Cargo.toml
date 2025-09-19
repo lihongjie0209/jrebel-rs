@@ -1,0 +1,51 @@
+[package]
+name = "jrebel-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["yu-xiaoyao"]
+description = "JRebel License Active Server implemented in Rust"
+license = "MIT"
+
+[dependencies]
+# Web framework
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP client/server
+hyper = { version = "1.0", features = ["full"] }
+
+# Cryptography
+rsa = { version = "0.9", features = ["sha1"] }
+sha1 = { version = "0.10", features = ["oid"] }
+md-5 = { version = "0.10", features = ["oid"] }
+base64 = "0.22"
+rand = "0.8"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Command line argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Template engine for HTML
+askama = { version = "0.12", features = ["with-axum"] }
+
+# URL encoding/decoding
+urlencoding = "2.1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"

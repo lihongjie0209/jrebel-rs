@@ -1,0 +1,41 @@
+# Multi-stage build for Rust application
+FROM rust:1.75 as builder
+
+WORKDIR /app
+
+# Copy Cargo files for dependency caching
+COPY Cargo.toml Cargo.lock ./
+
+# Create a dummy main.rs to cache dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies
+RUN cargo build --release && rm src/main.rs
+
+# Copy source code
+COPY src ./src
+
+# Build the application
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /app/target/release/jrebel-rs /app/jrebel-rs
+
+# Expose the default port
+EXPOSE 12345
+
+# Create a non-root user
+RUN useradd -r -s /bin/false jrebel
+USER jrebel
+
+# Run the application
+CMD ["./jrebel-rs"]
