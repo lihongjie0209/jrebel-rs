@@ -102,6 +102,31 @@ jrebel-rs
 export JREBEL_PORT=8080
 jrebel-rs --log-level debug  # 端口使用环境变量8080，日志级别使用命令行debug
 ```
+
+### 使用.env文件
+
+为了方便管理环境变量，你可以使用`.env.example`文件作为模板：
+
+```bash
+# 复制示例文件
+cp .env.example .env
+
+# 编辑配置
+# 修改 .env 文件中的配置项
+
+# Windows PowerShell中加载环境变量
+Get-Content .env | ForEach-Object {
+    if ($_ -match '^([^#][^=]*)=(.*)$') {
+        [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+    }
+}
+
+# Linux/macOS中加载环境变量  
+source .env
+
+# 然后启动服务器
+jrebel-rs
+```
     -i, --new-index                启用新索引 [默认: true]
     -w, --jrebel-work-mode <MODE>  JRebel工作模式 [默认: 0]
     --help                         显示此帮助信息
