@@ -22,31 +22,31 @@ use handlers::*;
 #[command(about = "JRebel License Active Server implemented in Rust")]
 struct Args {
     /// Server port, value range 1-65535
-    #[arg(short, long, default_value_t = 12345)]
+    #[arg(short, long, default_value_t = 12345, env = "JREBEL_PORT")]
     port: u16,
 
     /// Log level (trace, debug, info, warn, error)
-    #[arg(short, long, default_value = "info")]
+    #[arg(short, long, default_value = "info", env = "JREBEL_LOG_LEVEL")]
     log_level: String,
 
     /// Index page export schema (http or https)
-    #[arg(long, default_value = "http")]
+    #[arg(long, default_value = "http", env = "JREBEL_EXPORT_SCHEMA")]
     export_schema: String,
 
     /// Index page export host, ip or domain
-    #[arg(long, default_value = "")]
+    #[arg(long, default_value = "", env = "JREBEL_EXPORT_HOST")]
     export_host: String,
 
     /// Use New Index Page
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, env = "JREBEL_NEW_INDEX")]
     new_index: bool,
 
     /// JRebel Work mode. 0: auto, 1: force offline mode, 2: force online mode, 3: oldGuid
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, env = "JREBEL_WORK_MODE")]
     jrebel_work_mode: i32,
 
     /// Offline days for license
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = 30, env = "JREBEL_OFFLINE_DAYS")]
     offline_days: i32,
 }
 

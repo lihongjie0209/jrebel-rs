@@ -45,10 +45,63 @@ docker run -p 8080:8080 jrebel-rs
 jrebel-rs [选项]
 
 选项:
-    -p, --port <PORT>              服务器端口 [默认: 8080]
-    -d, --offline-days <DAYS>      离线模式天数 [默认: 30]
-    -s, --export-schema <SCHEMA>   导出模式 [默认: http]
-    -h, --export-host <HOST>       导出主机
+    -p, --port <PORT>                    服务器端口 [默认: 12345]
+    -l, --log-level <LEVEL>              日志级别 (trace, debug, info, warn, error) [默认: info]
+        --export-schema <SCHEMA>         导出模式 (http 或 https) [默认: http]
+        --export-host <HOST>             导出主机 (IP或域名) [默认: ""]
+        --new-index                      使用新版索引页面 [默认: true]
+        --jrebel-work-mode <MODE>        JRebel工作模式 [默认: 0]
+                                         0: 自动, 1: 强制离线, 2: 强制在线, 3: 旧GUID
+        --offline-days <DAYS>            离线许可证天数 [默认: 30]
+    -h, --help                           显示此帮助信息
+    -V, --version                        显示版本信息
+```
+
+### 环境变量支持
+
+所有命令行参数都可以通过环境变量设置，环境变量的优先级低于命令行参数：
+
+```bash
+# 设置服务器端口
+export JREBEL_PORT=8080
+
+# 设置日志级别
+export JREBEL_LOG_LEVEL=debug
+
+# 设置导出模式和主机
+export JREBEL_EXPORT_SCHEMA=https
+export JREBEL_EXPORT_HOST=jrebel.example.com
+
+# 设置工作模式
+export JREBEL_WORK_MODE=1
+
+# 设置离线天数
+export JREBEL_OFFLINE_DAYS=60
+
+# 设置索引页面模式
+export JREBEL_NEW_INDEX=false
+```
+
+### 启动示例
+
+使用命令行参数：
+```bash
+jrebel-rs --port 8080 --log-level debug --offline-days 60
+```
+
+使用环境变量：
+```bash
+export JREBEL_PORT=8080
+export JREBEL_LOG_LEVEL=debug
+export JREBEL_OFFLINE_DAYS=60
+jrebel-rs
+```
+
+混合使用（命令行参数会覆盖环境变量）：
+```bash
+export JREBEL_PORT=8080
+jrebel-rs --log-level debug  # 端口使用环境变量8080，日志级别使用命令行debug
+```
     -i, --new-index                启用新索引 [默认: true]
     -w, --jrebel-work-mode <MODE>  JRebel工作模式 [默认: 0]
     --help                         显示此帮助信息
