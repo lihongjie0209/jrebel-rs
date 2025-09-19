@@ -19,7 +19,7 @@
 确保已安装Rust 1.70+：
 
 ```bash
-git clone https://github.com/yu-xiaoyao/jrebel-rs.git
+git clone https://github.com/lihongjie0209/jrebel-rs.git
 cd jrebel-rs
 cargo build --release
 ```

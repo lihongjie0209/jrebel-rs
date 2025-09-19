@@ -2,7 +2,7 @@
 name = "jrebel-rs"
 version = "0.1.0"
 edition = "2021"
-authors = ["yu-xiaoyao"]
+authors = ["lihongjie0209"]
 description = "JRebel License Active Server implemented in Rust"
 license = "MIT"
 

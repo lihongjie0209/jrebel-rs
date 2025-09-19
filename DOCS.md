@@ -299,7 +299,7 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 
 ## 📞 Support
 
-- GitHub Issues: [Report bugs or request features](https://github.com/yu-xiaoyao/jrebel-license-active-server/issues)
+- GitHub Issues: [Report bugs or request features](https://github.com/lihongjie0209/jrebel-rs/issues)
 - Documentation: This README and inline code documentation
 - Community: Discussions in the GitHub repository
 

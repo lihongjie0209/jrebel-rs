@@ -527,7 +527,9 @@ fn create_new_index_html(host: &str, uuid: &str) -> String {
 
     <footer>
         <p>
-            <a href="https://github.com/yu-xiaoyao/jrebel-license-active-server" target="_blank">Developed from 2019 year</a>
+            <a href="https://github.com/lihongjie0209/jrebel-rs" target="_blank">JRebel-RS - Rust Version</a>
+            | 
+            <a href="https://github.com/yu-xiaoyao/jrebel-license-active-server" target="_blank">Original Go Version</a>
         </p>
     </footer>
 </div>
