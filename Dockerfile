@@ -1,10 +1,10 @@
 # Multi-stage build for Rust application
-FROM rust:1.75 as builder
+FROM rust:latest AS builder
 
 WORKDIR /app
 
 # Copy Cargo files for dependency caching
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 
 # Create a dummy main.rs to cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
