@@ -31,6 +31,12 @@ on:
           - 'true'
           - 'false'
 
+# 设置workflow权限
+permissions:
+  contents: write  # 允许创建release和上传文件
+  packages: write  # 允许推送Docker镜像
+  pull-requests: read  # 读取PR信息
+
 env:
   CARGO_TERM_COLOR: always
   DOCKERHUB_NAMESPACE: lihongjie0209
@@ -323,7 +329,7 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
     
     - name: 创建Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.release-notes.outputs.version }}
         name: JRebel-RS ${{ steps.release-notes.outputs.version }}
@@ -331,6 +337,7 @@ jobs:
         files: release-files/*
         draft: false
         prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        make_latest: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
