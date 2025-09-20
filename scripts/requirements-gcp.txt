@@ -1,0 +1,20 @@
+# GCP配置工具专用依赖
+# 这些依赖仅用于图像压缩服务项目的GCP Cloud Run配置脚本，不属于项目核心依赖
+
+# 命令行交互
+click>=8.1.7
+inquirer>=3.2.4
+
+# 美化输出
+rich>=13.7.1
+
+# Google Cloud SDK
+google-cloud-core>=2.4.1
+google-cloud-run>=0.10.3
+google-auth>=2.23.4
+
+# HTTP请求
+requests>=2.31.0
+
+# JSON操作
+pyyaml>=6.0.1
