@@ -116,10 +116,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Server listening on http://0.0.0.0:{}", config.port);
     debug!("Routes registered: /, /health, /health/simple, /jrebel/leases, /jrebel/leases/1, /agent/leases, /agent/leases/1, /jrebel/validate-connection, /rpc/ping.action, /rpc/obtainTicket.action, /rpc/releaseTicket.action");
 
-    if let Err(e) = axum::serve(listener, app).await {
-        error!("Server error: {}", e);
-        return Err(e.into());
-    }
+    // Start the server and run indefinitely
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
