@@ -233,3 +233,113 @@ jobs:
         echo "- [📚 使用文档](https://github.com/${{ github.repository }}/blob/master/README.md)" >> $GITHUB_STEP_SUMMARY
         echo "- [🐳 DockerHub](https://hub.docker.com/r/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }})" >> $GITHUB_STEP_SUMMARY
         echo "- [🔧 配置参考](https://github.com/${{ github.repository }}/blob/master/.env.example)" >> $GITHUB_STEP_SUMMARY
+
+  deploy-cloud-run:
+    name: 部署到GCP Cloud Run
+    needs: [build-and-push, test-image]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && success()
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 配置GCP身份验证
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: 设置Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      
+    - name: 提取版本号
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "image_uri=${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: 部署到Cloud Run
+      run: |
+        echo "🚀 开始部署JRebel-RS到GCP Cloud Run..."
+        
+        # 部署到Cloud Run
+        gcloud run deploy ${{ vars.CLOUD_RUN_SERVICE_NAME || 'jrebel-rs' }} \
+          --image=${{ steps.version.outputs.image_uri }} \
+          --platform=managed \
+          --region=${{ vars.GCP_REGION || 'asia-east1' }} \
+          --allow-unauthenticated \
+          --port=12345 \
+          --memory=${{ vars.CLOUD_RUN_MEMORY || '512Mi' }} \
+          --cpu=${{ vars.CLOUD_RUN_CPU || '1' }} \
+          --concurrency=${{ vars.CLOUD_RUN_CONCURRENCY || '80' }} \
+          --max-instances=${{ vars.CLOUD_RUN_MAX_INSTANCES || '10' }} \
+          --min-instances=${{ vars.CLOUD_RUN_MIN_INSTANCES || '0' }} \
+          --timeout=${{ vars.CLOUD_RUN_TIMEOUT || '300' }} \
+          --set-env-vars="JREBEL_LOG_LEVEL=${{ vars.JREBEL_LOG_LEVEL || 'info' }},JREBEL_PORT=12345,JREBEL_OFFLINE_DAYS=${{ vars.JREBEL_OFFLINE_DAYS || '30' }}" \
+          --quiet
+        
+        echo "✅ JRebel-RS Cloud Run部署完成"
+    
+    - name: 获取服务URL
+      id: service-url
+      run: |
+        SERVICE_URL=$(gcloud run services describe ${{ vars.CLOUD_RUN_SERVICE_NAME || 'jrebel-rs' }} \
+          --region=${{ vars.GCP_REGION || 'asia-east1' }} \
+          --format='value(status.url)')
+        echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+        echo "🌐 JRebel服务URL: $SERVICE_URL"
+    
+    - name: 验证部署
+      run: |
+        SERVICE_URL="${{ steps.service-url.outputs.url }}"
+        echo "🧪 测试JRebel服务健康状态..."
+        
+        # 等待服务启动
+        sleep 30
+        
+        # 健康检查
+        if curl -f "$SERVICE_URL/" > /dev/null 2>&1; then
+          echo "✅ JRebel服务健康检查通过"
+        else
+          echo "❌ JRebel服务健康检查失败"
+          exit 1
+        fi
+    
+    - name: 部署总结
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        SERVICE_URL="${{ steps.service-url.outputs.url }}"
+        
+        echo "## 🌐 JRebel-RS Cloud Run部署成功!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 部署信息" >> $GITHUB_STEP_SUMMARY
+        echo "- **版本**: \`v$VERSION\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **镜像**: \`${{ steps.version.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **服务名**: \`${{ vars.CLOUD_RUN_SERVICE_NAME || 'jrebel-rs' }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **区域**: \`${{ vars.GCP_REGION || 'asia-east1' }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **服务URL**: [$SERVICE_URL]($SERVICE_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 JRebel激活地址" >> $GITHUB_STEP_SUMMARY
+        echo "- [🌐 JRebel管理界面]($SERVICE_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "- **JRebel 7.1及以下版本**: \`$SERVICE_URL/{tokenname}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **JRebel 2018.1及以上版本**: \`$SERVICE_URL/{guid}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🧪 测试命令" >> $GITHUB_STEP_SUMMARY
+        echo '```bash' >> $GITHUB_STEP_SUMMARY
+        echo "# 健康检查" >> $GITHUB_STEP_SUMMARY
+        echo "curl $SERVICE_URL/" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# 获取JRebel GUID" >> $GITHUB_STEP_SUMMARY
+        echo "curl $SERVICE_URL/jrebel/leases" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# JRebel激活测试" >> $GITHUB_STEP_SUMMARY
+        echo "# 将URL配置到JRebel中: $SERVICE_URL/{your-guid}" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚙️ 配置说明" >> $GITHUB_STEP_SUMMARY
+        echo "- **端口**: 12345 (JRebel默认端口)" >> $GITHUB_STEP_SUMMARY
+        echo "- **内存**: ${{ vars.CLOUD_RUN_MEMORY || '512Mi' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **CPU**: ${{ vars.CLOUD_RUN_CPU || '1' }} vCPU" >> $GITHUB_STEP_SUMMARY
+        echo "- **并发**: ${{ vars.CLOUD_RUN_CONCURRENCY || '80' }} 个请求" >> $GITHUB_STEP_SUMMARY
+        echo "- **离线天数**: ${{ vars.JREBEL_OFFLINE_DAYS || '30' }} 天" >> $GITHUB_STEP_SUMMARY
