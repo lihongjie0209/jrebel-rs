@@ -90,6 +90,8 @@ async fn main() -> anyhow::Result<()> {
     // Build our application with routes
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/health", get(health_check_handler))
+        .route("/health/simple", get(health_simple_handler))
         .route("/jrebel/leases", post(jrebel_leases_handler))
         .route("/jrebel/leases/1", post(jrebel_leases1_handler))
         .route("/agent/leases", post(jrebel_leases_handler))
@@ -112,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
         config.port, config.export_schema
     );
     info!("Server listening on http://0.0.0.0:{}", config.port);
-    debug!("Routes registered: /, /jrebel/leases, /jrebel/leases/1, /agent/leases, /agent/leases/1, /jrebel/validate-connection, /rpc/ping.action, /rpc/obtainTicket.action, /rpc/releaseTicket.action");
+    debug!("Routes registered: /, /health, /health/simple, /jrebel/leases, /jrebel/leases/1, /agent/leases, /agent/leases/1, /jrebel/validate-connection, /rpc/ping.action, /rpc/obtainTicket.action, /rpc/releaseTicket.action");
 
     if let Err(e) = axum::serve(listener, app).await {
         error!("Server error: {}", e);

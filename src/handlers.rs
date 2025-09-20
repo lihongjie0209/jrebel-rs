@@ -545,3 +545,27 @@ fn create_simple_index_html(host: &str, uuid: &str) -> String {
 <p>JRebel 2018.1 and later version Activation address was: {}/{{guid}}(eg:<span style='color:red'> {}/{} </span>), with any email.</p>"#, 
     host, host, host, host, uuid)
 }
+
+/// 健康检查接口
+/// 返回服务器状态信息，用于监控和负载均衡器检查
+pub async fn health_check_handler() -> Json<serde_json::Value> {
+    info!("Health check request received");
+    
+    let current_time = chrono::Utc::now();
+    
+    Json(serde_json::json!({
+        "status": "healthy",
+        "service": "jrebel-rs",
+        "version": env!("CARGO_PKG_VERSION"),
+        "timestamp": current_time.to_rfc3339(),
+        "uptime": format!("{}s", current_time.timestamp()),
+        "message": "JRebel License Active Server is running"
+    }))
+}
+
+/// 健康检查接口（简化版本）
+/// 仅返回HTTP 200状态码，用于快速健康检查
+pub async fn health_simple_handler() -> StatusCode {
+    debug!("Simple health check request received");
+    StatusCode::OK
+}
