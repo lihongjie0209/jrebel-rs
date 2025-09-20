@@ -38,7 +38,7 @@ pub async fn index_handler(
     let host = if config.export_host.is_empty() {
         // 优先使用 X-Original-Host 头，适用于反向代理场景
         let host_header = headers
-            .get("x-original-host")
+            .get("X-Export-Host")
             .and_then(|h| h.to_str().ok())
             .or_else(|| {
                 // 如果没有 X-Original-Host，使用 Host 头
