@@ -22,10 +22,14 @@ on:
         options:
           - 'true'
           - 'false'
-      custom_tag:
-        description: '自定义标签（可选）'
-        required: false
-        type: string
+      create_release:
+        description: '是否创建GitHub Release'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 env:
   CARGO_TERM_COLOR: always
@@ -48,26 +52,143 @@ jobs:
         
     - name: 设置Rust缓存
       uses: Swatinem/rust-cache@v2
-      with:
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+    - name: 运行代码格式检查
+      run: cargo fmt --all -- --check
+      
+    - name: 运行Clippy检查
+      run: cargo clippy --all-targets --all-features -- -D warnings
       
     - name: 运行单元测试
       run: cargo test --verbose
-      
-    - name: 构建项目
-      run: cargo build --release --verbose
 
-
-  build-and-push:
-    name: 构建和推送Docker镜像
+  build:
+    name: 跨平台构建
     needs: [test]
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-amd64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: macos-amd64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-arm64
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout代码
+      uses: actions/checkout@v4
+      
+    - name: 安装Rust工具链
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+        
+    - name: 设置Rust缓存
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ matrix.target }}
+    
+    - name: 安装交叉编译工具 (Linux ARM64)
+      if: matrix.target == 'aarch64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+    
+    - name: 构建二进制文件
+      run: cargo build --release --target ${{ matrix.target }}
+    
+    - name: 准备发布文件 (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        mkdir -p artifacts
+        binary_name="jrebel-rs"
+        if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+          binary_name="jrebel-rs.exe"
+        fi
+        
+        cp target/${{ matrix.target }}/release/$binary_name artifacts/
+        cd artifacts
+        tar -czf ../jrebel-rs-${{ matrix.name }}.tar.gz *
+    
+    - name: 准备发布文件 (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path artifacts
+        Copy-Item target\${{ matrix.target }}\release\jrebel-rs.exe artifacts\
+        Compress-Archive -Path artifacts\* -DestinationPath jrebel-rs-${{ matrix.name }}.zip
+    
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: jrebel-rs-${{ matrix.name }}
+        path: |
+          jrebel-rs-${{ matrix.name }}.tar.gz
+          jrebel-rs-${{ matrix.name }}.zip
+        retention-days: 30
+    
+    - name: 上传Linux AMD64二进制文件供Docker使用
+      if: matrix.target == 'x86_64-unknown-linux-gnu'
+      uses: actions/upload-artifact@v4
+      with:
+        name: jrebel-rs-linux-binary
+        path: target/${{ matrix.target }}/release/jrebel-rs
+        retention-days: 1
+
+  docker-build:
+    name: 构建Docker镜像
+    needs: [build]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.inputs.push_to_dockerhub == 'true'
     
     steps:
     - name: Checkout代码
       uses: actions/checkout@v4
-      
+    
+    - name: 下载Linux二进制文件
+      uses: actions/download-artifact@v4
+      with:
+        name: jrebel-rs-linux-binary
+        path: ./
+    
+    - name: 创建简化Dockerfile
+      run: |
+        cat > Dockerfile.optimized << 'EOF'
+        FROM debian:bookworm-slim
+        
+        RUN apt-get update && apt-get install -y \
+            ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+        
+        WORKDIR /app
+        
+        # 复制预编译的二进制文件
+        COPY jrebel-rs /app/jrebel-rs
+        RUN chmod +x /app/jrebel-rs
+        
+        # 创建非root用户
+        RUN useradd -r -s /bin/false jrebel
+        RUN chown jrebel:jrebel /app/jrebel-rs
+        USER jrebel
+        
+        EXPOSE 12345
+        
+        CMD ["./jrebel-rs"]
+        EOF
+    
     - name: 设置Docker Buildx
       uses: docker/setup-buildx-action@v3
       
@@ -84,17 +205,11 @@ jobs:
       with:
         images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}
         tags: |
-          # Tag触发: v1.0.0 -> 1.0.0, latest
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
-          # 主分支: master -> master
           type=ref,event=branch
-          # PR: pr-123
           type=ref,event=pr
-          # 手动触发自定义标签
-          type=raw,value={{inputs.custom_tag}},enable=${{ github.event.inputs.custom_tag != '' }}
-          # latest标签仅对tag和main分支
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
         labels: |
@@ -102,141 +217,129 @@ jobs:
           org.opencontainers.image.description=JRebel许可证激活服务器 - Rust实现版本，高性能的JRebel许可证激活服务
           org.opencontainers.image.vendor=lihongjie0209
           org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/master/README.md
     
     - name: 构建和推送Docker镜像
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile
-        platforms: linux/amd64,linux/arm64
+        file: ./Dockerfile.optimized
+        platforms: linux/amd64
         push: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_to_dockerhub == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        build-args: |
-          BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
-          VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-          REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
-    
-    - name: 构建摘要
-      run: |
-        echo "## 🐳 JRebel-RS Docker构建结果" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
-        echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
-        echo "| 🏷️ 触发方式 | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 📦 镜像名称 | \`${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🏗️ 构建平台 | linux/amd64, linux/arm64 |" >> $GITHUB_STEP_SUMMARY
-        if [[ "${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_to_dockerhub == 'true' }}" == "true" ]]; then
-          echo "| 🚀 推送状态 | ✅ 已推送到DockerHub |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| 🚀 推送状态 | ⏸️ 仅构建，未推送 |" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🏷️ 生成的标签:" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo '${{ steps.meta.outputs.tags }}' | sed 's/,/\n/g' >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-    
-    - name: 安全扫描
-      if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_to_dockerhub == 'true'
-      uses: docker/scout-action@v1
-      with:
-        command: cves
-        image: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-        only-severities: critical,high
-        exit-code: false # 不因安全问题阻止发布
 
-  test-image:
-    name: 测试Docker镜像
-    needs: build-and-push
+  release:
+    name: 创建GitHub Release
+    needs: [build, docker-build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_to_dockerhub == 'true'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
     
     steps:
-    - name: 提取元数据
-      id: meta
-      uses: docker/metadata-action@v5
+    - name: Checkout代码
+      uses: actions/checkout@v4
+    
+    - name: 下载所有构建产物
+      uses: actions/download-artifact@v4
       with:
-        images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}
-        tags: |
-          type=semver,pattern={{version}}
-          type=ref,event=branch
-          type=raw,value={{inputs.custom_tag}},enable=${{ github.event.inputs.custom_tag != '' }}
+        pattern: jrebel-rs-*
+        merge-multiple: false
     
-    - name: 测试Docker镜像
+    - name: 整理发布文件
       run: |
-        IMAGE_TAG="${{ steps.meta.outputs.version }}"
-        if [ -z "$IMAGE_TAG" ]; then
-          IMAGE_TAG="master"
-        fi
-        
-        echo "🧪 测试镜像: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG"
-        
-        # 启动容器
-        docker run -d --name jrebel-test \
-          -p 12345:12345 \
-          ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG
-        
-        # 等待服务启动
-        sleep 10
-        
-        # 测试健康检查
-        curl -f http://localhost:12345/ || exit 1
-        
-        # 清理
-        docker stop jrebel-test
-        docker rm jrebel-test
-        
-        echo "✅ 镜像测试通过"
-
-  release-notification:
-    name: 发布通知
-    needs: [build-and-push, test-image]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && success()
+        mkdir -p release-files
+        find . -name "*.tar.gz" -o -name "*.zip" | while read file; do
+          if [[ -f "$file" ]]; then
+            cp "$file" release-files/
+          fi
+        done
+        ls -la release-files/
     
-    steps:
-    - name: 发布通知
+    - name: 生成发布说明
+      id: release-notes
       run: |
         VERSION=${GITHUB_REF#refs/tags/}
-        echo "## 🎉 JRebel-RS 新版本发布成功!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📦 镜像信息" >> $GITHUB_STEP_SUMMARY
-        echo "- **版本**: \`$VERSION\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **镜像**: \`${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **平台**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🚀 使用方式" >> $GITHUB_STEP_SUMMARY
-        echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo "# 拉取最新版本" >> $GITHUB_STEP_SUMMARY
-        echo "docker pull ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# 运行JRebel License Server" >> $GITHUB_STEP_SUMMARY
-        echo "docker run -d -p 12345:12345 \\" >> $GITHUB_STEP_SUMMARY
-        echo "  --name jrebel-server \\" >> $GITHUB_STEP_SUMMARY
-        echo "  -e JREBEL_LOG_LEVEL=info \\" >> $GITHUB_STEP_SUMMARY
-        echo "  ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# 自定义端口和配置" >> $GITHUB_STEP_SUMMARY
-        echo "docker run -d -p 8080:8080 \\" >> $GITHUB_STEP_SUMMARY
-        echo "  --name jrebel-server \\" >> $GITHUB_STEP_SUMMARY
-        echo "  -e JREBEL_PORT=8080 \\" >> $GITHUB_STEP_SUMMARY
-        echo "  -e JREBEL_LOG_LEVEL=debug \\" >> $GITHUB_STEP_SUMMARY
-        echo "  -e JREBEL_OFFLINE_DAYS=60 \\" >> $GITHUB_STEP_SUMMARY
-        echo "  ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔗 相关链接" >> $GITHUB_STEP_SUMMARY
-        echo "- [📚 使用文档](https://github.com/${{ github.repository }}/blob/master/README.md)" >> $GITHUB_STEP_SUMMARY
-        echo "- [🐳 DockerHub](https://hub.docker.com/r/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }})" >> $GITHUB_STEP_SUMMARY
-        echo "- [🔧 配置参考](https://github.com/${{ github.repository }}/blob/master/.env.example)" >> $GITHUB_STEP_SUMMARY
+        if [[ -z "$VERSION" ]]; then
+          VERSION="manual-$(date +%Y%m%d-%H%M%S)"
+        fi
+        
+        cat > release-notes.md << EOF
+        # JRebel-RS $VERSION 发布
+        
+        ## 🚀 新版本特性
+        
+        这是JRebel License Active Server的Rust实现版本，提供高性能的JRebel许可证激活服务。
+        
+        ## 📦 下载说明
+        
+        ### 二进制文件
+        - **Linux AMD64**: \`jrebel-rs-linux-amd64.tar.gz\`
+        - **Linux ARM64**: \`jrebel-rs-linux-arm64.tar.gz\`  
+        - **Windows AMD64**: \`jrebel-rs-windows-amd64.zip\`
+        - **macOS AMD64**: \`jrebel-rs-macos-amd64.tar.gz\`
+        - **macOS ARM64**: \`jrebel-rs-macos-arm64.tar.gz\`
+        
+        ### Docker镜像
+        \`\`\`bash
+        docker pull ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}
+        \`\`\`
+        
+        ## 🔧 使用方法
+        
+        ### 二进制文件使用
+        \`\`\`bash
+        # 解压文件
+        tar -xzf jrebel-rs-linux-amd64.tar.gz  # Linux
+        # unzip jrebel-rs-windows-amd64.zip     # Windows
+        
+        # 运行服务
+        ./jrebel-rs --port 12345 --log-level info
+        \`\`\`
+        
+        ### Docker使用
+        \`\`\`bash
+        # 基础运行
+        docker run -d -p 12345:12345 ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}
+        
+        # 自定义配置
+        docker run -d -p 8080:8080 \\
+          -e JREBEL_PORT=8080 \\
+          -e JREBEL_LOG_LEVEL=debug \\
+          -e JREBEL_OFFLINE_DAYS=60 \\
+          ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION#v}
+        \`\`\`
+        
+        ## 🔗 相关链接
+        
+        - [📚 使用文档](https://github.com/${{ github.repository }}/blob/master/README.md)
+        - [🐳 DockerHub](https://hub.docker.com/r/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }})
+        - [🔧 配置参考](https://github.com/${{ github.repository }})
+        
+        ## 🏷️ 版本信息
+        
+        - **提交**: \`${{ github.sha }}\`
+        - **构建时间**: \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\`
+        - **支持平台**: Linux (AMD64/ARM64), Windows (AMD64), macOS (AMD64/ARM64)
+        EOF
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: 创建Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.release-notes.outputs.version }}
+        name: JRebel-RS ${{ steps.release-notes.outputs.version }}
+        body_path: release-notes.md
+        files: release-files/*
+        draft: false
+        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-cloud-run:
     name: 部署到GCP Cloud Run
-    needs: [build-and-push, test-image]
+    needs: [docker-build]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') && success()
     
@@ -248,6 +351,7 @@ jobs:
       uses: google-github-actions/auth@v2
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
     - name: 设置Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
       
@@ -262,7 +366,6 @@ jobs:
       run: |
         echo "🚀 开始部署JRebel-RS到GCP Cloud Run..."
         
-        # 部署到Cloud Run
         gcloud run deploy ${{ vars.CLOUD_RUN_SERVICE_NAME || 'jrebel-rs' }} \
           --image=${{ steps.version.outputs.image_uri }} \
           --platform=managed \
@@ -294,51 +397,11 @@ jobs:
         SERVICE_URL="${{ steps.service-url.outputs.url }}"
         echo "🧪 测试JRebel服务健康状态..."
         
-        # 等待服务启动
         sleep 30
         
-        # 健康检查
-        if curl -f "$SERVICE_URL/" > /dev/null 2>&1; then
+        if curl -f "$SERVICE_URL/health" > /dev/null 2>&1; then
           echo "✅ JRebel服务健康检查通过"
         else
           echo "❌ JRebel服务健康检查失败"
           exit 1
         fi
-    
-    - name: 部署总结
-      run: |
-        VERSION=${{ steps.version.outputs.version }}
-        SERVICE_URL="${{ steps.service-url.outputs.url }}"
-        
-        echo "## 🌐 JRebel-RS Cloud Run部署成功!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 部署信息" >> $GITHUB_STEP_SUMMARY
-        echo "- **版本**: \`v$VERSION\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **镜像**: \`${{ steps.version.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **服务名**: \`${{ vars.CLOUD_RUN_SERVICE_NAME || 'jrebel-rs' }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **区域**: \`${{ vars.GCP_REGION || 'asia-east1' }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **服务URL**: [$SERVICE_URL]($SERVICE_URL)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔗 JRebel激活地址" >> $GITHUB_STEP_SUMMARY
-        echo "- [🌐 JRebel管理界面]($SERVICE_URL)" >> $GITHUB_STEP_SUMMARY
-        echo "- **JRebel 7.1及以下版本**: \`$SERVICE_URL/{tokenname}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **JRebel 2018.1及以上版本**: \`$SERVICE_URL/{guid}\`" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🧪 测试命令" >> $GITHUB_STEP_SUMMARY
-        echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo "# 健康检查" >> $GITHUB_STEP_SUMMARY
-        echo "curl $SERVICE_URL/" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# 获取JRebel GUID" >> $GITHUB_STEP_SUMMARY
-        echo "curl $SERVICE_URL/jrebel/leases" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# JRebel激活测试" >> $GITHUB_STEP_SUMMARY
-        echo "# 将URL配置到JRebel中: $SERVICE_URL/{your-guid}" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### ⚙️ 配置说明" >> $GITHUB_STEP_SUMMARY
-        echo "- **端口**: 12345 (JRebel默认端口)" >> $GITHUB_STEP_SUMMARY
-        echo "- **内存**: ${{ vars.CLOUD_RUN_MEMORY || '512Mi' }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **CPU**: ${{ vars.CLOUD_RUN_CPU || '1' }} vCPU" >> $GITHUB_STEP_SUMMARY
-        echo "- **并发**: ${{ vars.CLOUD_RUN_CONCURRENCY || '80' }} 个请求" >> $GITHUB_STEP_SUMMARY
-        echo "- **离线天数**: ${{ vars.JREBEL_OFFLINE_DAYS || '30' }} 天" >> $GITHUB_STEP_SUMMARY
