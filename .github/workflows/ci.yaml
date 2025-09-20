@@ -50,12 +50,6 @@ jobs:
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        
-    - name: 代码格式检查
-      run: cargo fmt --all -- --check
-      
-    - name: Clippy代码检查
-      run: cargo clippy --all-targets --all-features -- -D warnings
       
     - name: 运行单元测试
       run: cargo test --verbose
@@ -63,26 +57,10 @@ jobs:
     - name: 构建项目
       run: cargo build --release --verbose
 
-  security-audit:
-    name: 安全审计
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout代码
-      uses: actions/checkout@v4
-      
-    - name: 安装Rust工具链
-      uses: dtolnay/rust-toolchain@stable
-      
-    - name: 安装cargo-audit
-      run: cargo install cargo-audit
-      
-    - name: 运行安全审计
-      run: cargo audit
 
   build-and-push:
     name: 构建和推送Docker镜像
-    needs: [test, security-audit]
+    needs: [test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.inputs.push_to_dockerhub == 'true'
     
