@@ -3,14 +3,17 @@ FROM rust:latest AS builder
 
 WORKDIR /app
 
+# Add the target for x86_64-unknown-linux-gnu
+RUN rustup target add x86_64-unknown-linux-gnu
+
 # Copy Cargo files for dependency caching
 COPY Cargo.toml ./
 
 # Create a dummy main.rs to cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies
-RUN cargo build --release && rm src/main.rs
+# Build dependencies for the target platform
+RUN cargo build --release --target x86_64-unknown-linux-gnu && rm src/main.rs
 
 # Copy source code
 COPY src ./src
