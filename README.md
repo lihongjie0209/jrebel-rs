@@ -50,9 +50,117 @@ cargo run --release -- --port 8080
 
 ### Docker部署
 
+#### 使用预构建镜像（推荐）
+
+从DockerHub拉取最新版本：
+
 ```bash
-docker build -t jrebel-rs .
-docker run -p 8080:8080 jrebel-rs
+# 拉取最新版本
+docker pull lihongjie0209/jrebel-rs:latest
+
+# 快速启动（默认端口12345）
+docker run -d --name jrebel-server -p 12345:12345 lihongjie0209/jrebel-rs:latest
+
+# 自定义端口启动
+docker run -d --name jrebel-server -p 8080:8080 \
+  -e JREBEL_PORT=8080 \
+  lihongjie0209/jrebel-rs:latest
+
+# 完整配置启动
+docker run -d --name jrebel-server -p 8080:8080 \
+  -e JREBEL_PORT=8080 \
+  -e JREBEL_LOG_LEVEL=info \
+  -e JREBEL_OFFLINE_DAYS=60 \
+  -e JREBEL_EXPORT_SCHEMA=https \
+  -e JREBEL_EXPORT_HOST=jrebel.example.com \
+  lihongjie0209/jrebel-rs:latest
+
+# 查看日志
+docker logs -f jrebel-server
+
+# 停止和清理
+docker stop jrebel-server
+docker rm jrebel-server
+```
+
+#### 使用特定版本
+
+```bash
+# 使用指定版本
+docker pull lihongjie0209/jrebel-rs:1.0.3
+docker run -d --name jrebel-server -p 12345:12345 lihongjie0209/jrebel-rs:1.0.3
+```
+
+#### Docker Compose部署
+
+创建 `docker-compose.yml` 文件：
+
+```yaml
+version: '3.8'
+
+services:
+  jrebel-server:
+    image: lihongjie0209/jrebel-rs:latest
+    container_name: jrebel-server
+    ports:
+      - "12345:12345"
+    environment:
+      - JREBEL_PORT=12345
+      - JREBEL_LOG_LEVEL=info
+      - JREBEL_OFFLINE_DAYS=30
+      - JREBEL_EXPORT_SCHEMA=http
+      # - JREBEL_EXPORT_HOST=jrebel.example.com  # 可选：自定义域名
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:12345/health/simple"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 可选：使用nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: jrebel-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL证书目录
+    depends_on:
+      - jrebel-server
+    restart: unless-stopped
+```
+
+启动服务：
+
+```bash
+# 启动所有服务
+docker-compose up -d
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f jrebel-server
+
+# 停止服务
+docker-compose down
+```
+
+#### 从源码构建（开发用途）
+
+```bash
+# 克隆仓库
+git clone https://github.com/lihongjie0209/jrebel-rs.git
+cd jrebel-rs
+
+# 构建镜像
+docker build -t jrebel-rs:local .
+
+# 运行本地构建的镜像
+docker run -p 12345:12345 jrebel-rs:local
 ```
 
 ## 🔧 使用方法
